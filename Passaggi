@@ -42,3 +42,28 @@ Impostazioni:
   limita a utenti unifi.it
   Risposte → foglio Chiusure
 
+3) Apps Script (il “motore”)
+Lo metti nello Sheet “Registro Mezzo”.
+Funzioni che ti servono
+  On submit Form #1 (Prenotazione)
+    valida che inizio < fine
+    controlla conflitti sul Calendar (eventi sovrapposti)
+    se libero:
+      genera ID prenotazione (es. MZ-2026-000123)
+      crea evento su Calendar
+      salva nello Sheet: ID, link evento, stato PRENOTATA
+      invia 2 email:
+        all’utente: conferma + link calendario + link “Riconsegna” (Form #2 precompilato con ID)
+        al referente: notifica “nuova prenotazione” + contatti + orari (così sa a chi dare la chiave)
+    se occupato:
+      invia email all’utente “conflitto, scegli altri orari”
+      marca la riga RIFIUTATA (conflitto) (o la lasci in “KO”)
+  On submit Form #2 (Riconsegna)
+    trova la prenotazione corrispondente tramite ID
+    calcola km percorsi (se hai km iniziali e finali)
+    aggiorna lo stato CONCLUSA
+    (opzionale) aggiorna la descrizione dell’evento Calendar con km e note finali
+    manda email al referente con “mezzo riconsegnato + eventuali problemi”
+
+
+
