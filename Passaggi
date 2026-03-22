@@ -1,15 +1,44 @@
-Creo un Modulo "Prenotazione Mezzo" copn i campi seguenti:
-Informazioni cronologiche	(questo lo inserisce in automatico...)
-Inizio Prenotazione	(campo)
-Fine Prenotazione	(campo)
-Motivazione	(campo)
-Nome	(campo)
-Destinazione	(campo)
-Note	(campo)
-Indirizzo email	(questo lo inserisxce il sistema se chiedi di memorizzare la mail dell'interlocutore)
+1) Setup base
+A. Google Calendar
+  Crea un calendario dedicato: “Mezzo Dipartimento”
+  Condivisione:
+    - Gruppo (es. mezzo-utenti@unifi.it): Vedi tutti i dettagli (o “Solo libero/occupato” se vuoi più privacy)
+    - Solo lo Script (che gira come proprietario del file): può creare eventi
+    - Referente (es. referente-mezzo@unifi.it): Gestisci eventi (facoltativo)
+B. Google Sheet (registro)
+Crea uno Sheet: “Registro Mezzo” con 3 fogli:  
+  Prenotazioni (risposte Form richiesta)
+  Chiusure (risposte Form riconsegna)
+  Dashboard (vista “pulita” per Sites: prossime prenotazioni + contatti referente)
 
-Poi sul foglio aggiungi in fondo alle colonne queste 3 nuove colonne:
-ID	
-Stato	
-Token
+2) Google Forms
+  Creo un Modulo "Prenotazione Mezzo" copn i campi seguenti:
+    Informazioni cronologiche	(questo lo inserisce in automatico...)
+    Inizio Prenotazione	(campo)
+    Fine Prenotazione	(campo)
+    Motivazione	(campo)
+    Nome	(campo)
+    Destinazione	(campo)
+    Note	(campo)
+    Indirizzo email	(questo lo inserisxce il sistema se chiedi di memorizzare la mail dell'interlocutore)
+  Poi sul foglio aggiungi in fondo alle colonne queste 3 nuove colonne:
+    ID	
+    Stato	
+    Token
+  Impostazioni:
+    Raccogli indirizzi email (obbligatorio, interno)
+    Limita a utenti unifi.it
+    Risposte → nel foglio Prenotazioni
+
+Creo un secondo Modulo "Prenotazione Mezzo" copn i campi seguenti:
+  Informazioni cronologiche
+  ID Prenotazione	
+  Km iniziali
+  Km Finali
+  Problemi / danni?
+  Note finali
+  Indirizzo email
+Impostazioni:
+  limita a utenti unifi.it
+  Risposte → foglio Chiusure
 
