@@ -1,0 +1,15 @@
+Creo un Modulo "Prenotazione Mezzo" copn i campi seguenti:
+Informazioni cronologiche	(questo lo inserisce in automatico...)
+Inizio Prenotazione	(campo)
+Fine Prenotazione	(campo)
+Motivazione	(campo)
+Nome	(campo)
+Destinazione	(campo)
+Note	(campo)
+Indirizzo email	(questo lo inserisxce il sistema se chiedi di memorizzare la mail dell'interlocutore)
+
+Poi sul foglio aggiungi in fondo alle colonne queste 3 nuove colonne:
+ID	
+Stato	
+Token
+
