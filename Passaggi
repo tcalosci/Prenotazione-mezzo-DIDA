@@ -12,6 +12,13 @@ Crea uno Sheet: “Registro Mezzo” con 3 fogli:
   Dashboard (vista “pulita” per Sites: prossime prenotazioni + contatti referente)
 
 2) Google Forms
+  Limita l’accesso al Form (soluzione Form+script)
+  Nel Modulo Prenotazione:
+    Impostazioni → Risposte
+    ✅ Raccogli indirizzi email
+    ✅ Limita agli utenti di unifi.it
+    e soprattutto: condividi il link del Form solo su un Site visibile a un gruppo.
+
   Creo un Modulo "Prenotazione Mezzo" copn i campi seguenti:
     Informazioni cronologiche	(questo lo inserisce in automatico...)
     Inizio Prenotazione	(campo)
@@ -65,5 +72,25 @@ Funzioni che ti servono
     (opzionale) aggiorna la descrizione dell’evento Calendar con km e note finali
     manda email al referente con “mezzo riconsegnato + eventuali problemi”
 
+4) Google Sites (interno unifi.it)
+Nel Google Site:
+  Imposta il Site come visibile solo a un gruppo Google, es. mezzo-prenotazioni@unifi.it
+  Chi non è nel gruppo non vede nemmeno i pulsanti/link.
 
+Crea un Site “Prenotazione Mezzo” con 3 blocchi:
+  Calendario disponibilità
+    Inserisci → Calendar → seleziona “Mezzo Dipartimento”
+    Visualizzazione settimanale
+  Pulsanti
+    “Prenota il mezzo” → link Form #1
+    “Riconsegna / chiusura utilizzo” → link Form #2
+      (questo link “generico” va bene; quello “precompilato con ID” lo riceveranno via email)
+  Riepilogo (opzionale)
+    Inserisci una tabella/visualizzazione dal foglio Dashboard con:
+      prossime prenotazioni (data inizio/fine + nome richiedente)
+      referente e contatti
+      regole (ritiro chiave, carburante, pulizia, ecc.)
+
+Permessi Sites:
+  visibile solo a utenti @unifi.it o gruppi specifici
 
