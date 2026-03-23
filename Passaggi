@@ -1,3 +1,13 @@
+la soluzione “pulita” in Google Workspace è:
+
+- l’utente compila il Form Prenotazione
+- lo script NON crea subito l’evento
+- lo script mette la richiesta in IN ATTESA e manda una mail all’operatore con 2 link:
+- APPROVA
+- RIFIUTA
+- quando l’operatore clicca, una Web App Apps Script aggiorna lo stato e (se approvato) crea l’evento su Calendar
+
+
 1) Setup base
 A. Google Calendar
   Crea un calendario dedicato: “Mezzo Dipartimento”
@@ -32,12 +42,16 @@ Crea uno Sheet: “Registro Mezzo” con 3 fogli:
     ID	
     Stato	
     Token
+    EventId
+    DecisionBy
+    DecisionAt
+
   Impostazioni:
     Raccogli indirizzi email (obbligatorio, interno)
     Limita a utenti unifi.it
     Risposte → nel foglio Prenotazioni
 
-Creo un secondo Modulo "Prenotazione Mezzo" copn i campi seguenti:
+Creo un secondo Modulo "Riconsegna Mezzo" copn i campi seguenti:
   Informazioni cronologiche
   ID Prenotazione	
   Km iniziali
@@ -93,4 +107,348 @@ Crea un Site “Prenotazione Mezzo” con 3 blocchi:
 
 Permessi Sites:
   visibile solo a utenti @unifi.it o gruppi specifici
+
+******************************************************************************************************
+
+Perfetto: **approvazione sempre** ⇒ la soluzione “pulita” in Google Workspace è:
+
+* l’utente compila il **Form Prenotazione**
+* lo script **NON crea** subito l’evento
+* lo script mette la richiesta in **IN ATTESA** e manda una mail all’operatore con 2 link:
+  * **APPROVA**
+  * **RIFIUTA**
+* quando l’operatore clicca, una **Web App Apps Script** aggiorna lo stato e (se approvato) crea l’evento su Calendar
+
+# 1) Cosa serve preparare nello Sheet
+Nel foglio risposte **Prenotazioni** aggiungi (a destra, come nuove colonne) queste intestazioni **esatte** in riga 1:
+* `ID`
+* `Stato`
+* `Token`
+* `EventId`
+* `DecisionBy`
+* `DecisionAt`
+
+---
+
+# 2) Imposta il progetto Apps Script “nel FOGLIO”
+
+Apri lo Spreadsheet → **Estensioni → Apps Script** (è meglio che lo script sia “bound” allo Sheet)
+
+---
+
+# 3) Codice: approvazione sempre (Form submit + Web App)
+
+Incolla/integra questo. È pensato per essere robusto (niente `lastRow`, filtra per foglio, ecc.).
+
+```javascript
+/************ CONFIG ************/
+const CONFIG = {
+  TIMEZONE: "Europe/Rome",
+  CALENDAR_ID: "INSERISCI_CALENDAR_ID_QUI",
+  OPERATORE_EMAILS: ["operatore1@unifi.it", "operatore2@unifi.it"], // oppure solo 1
+  WEBAPP_URL: "INCOLLA_QUI_URL_WEBAPP" // lo inserirai dopo il deploy
+};
+
+const SHEET_PRENOTAZIONI = "Risposte modulo 1"; // nome TAB prenotazioni (identico)
+const COLS = {
+  ID: "ID",
+  STATO: "Stato",
+  TOKEN: "Token",
+  EVENTID: "EventId",
+  DEC_BY: "DecisionBy",
+  DEC_AT: "DecisionAt"
+};
+
+/************ UTIL ************/
+function ensureCol_(headers, name) {
+  const idx = headers.indexOf(name);
+  if (idx >= 0) return idx + 1;
+  // se non c'è, la aggiungo in fondo
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const lastCol = sh.getLastColumn();
+  sh.getRange(1, lastCol + 1).setValue(name);
+  return lastCol + 1;
+}
+
+function get_(headers, row, name) {
+  const i = headers.indexOf(name);
+  return i >= 0 ? row[i] : "";
+}
+
+function randToken_() {
+  return Utilities.getUuid().replace(/-/g, "");
+}
+
+function fmt_(d) {
+  return Utilities.formatDate(new Date(d), CONFIG.TIMEZONE, "yyyy-MM-dd HH:mm");
+}
+
+function isOperatore_(email) {
+  return CONFIG.OPERATORE_EMAILS.map(e => e.toLowerCase()).includes(String(email).toLowerCase());
+}
+
+/************ 1) Trigger: Submit Prenotazione ************/
+function onPrenotazioneSubmit(e) {
+  const sh = e.range.getSheet();
+  if (sh.getName() !== SHEET_PRENOTAZIONI) return;
+
+  const rowIndex = e.range.getRow();
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const row = sh.getRange(rowIndex, 1, 1, sh.getLastColumn()).getValues()[0];
+
+  // ⚠️ Adatta questi nomi alle tue colonne reali (riga 1 nello sheet)
+  const email = get_(headers, row, "Indirizzo email");
+  const inizioRaw = get_(headers, row, "Data/ora inizio");
+  const fineRaw = get_(headers, row, "Data/ora fine");
+  const motivazione = get_(headers, row, "Motivazione");
+  const destinazione = get_(headers, row, "Destinazione") || get_(headers, row, "Destinazione / itinerario");
+  const telefono = get_(headers, row, "Telefono");
+  const note = get_(headers, row, "Note");
+
+  const inizio = new Date(inizioRaw);
+  const fine = new Date(fineRaw);
+
+  // regole base
+  if (!email || isNaN(inizio) || isNaN(fine) || inizio >= fine) {
+    if (email) MailApp.sendEmail(email, "Prenotazione mezzo: dati non validi",
+      "Controlla data/ora inizio e fine e reinvia la richiesta.");
+    return;
+  }
+
+  // regola oraria 08-19 e no weekend (Lun=1 ... Dom=7)
+  const day = Number(Utilities.formatDate(inizio, CONFIG.TIMEZONE, "u"));
+  const hourStart = Number(Utilities.formatDate(inizio, CONFIG.TIMEZONE, "H"));
+  const hourEnd = Number(Utilities.formatDate(fine, CONFIG.TIMEZONE, "H"));
+
+  if (day >= 6) { // sab(6) dom(7)
+    MailApp.sendEmail(email, "Prenotazione mezzo: weekend non disponibile",
+      "Il mezzo non è prenotabile nel weekend (sabato e domenica).");
+    setStato_(sh, headers, rowIndex, "KO: weekend");
+    return;
+  }
+  if (hourStart < 8 || hourEnd > 19) {
+    MailApp.sendEmail(email, "Prenotazione mezzo: fuori orario",
+      "Il mezzo è prenotabile solo tra le 08:00 e le 19:00 (se serve oltre, va prenotato il giorno successivo).");
+    setStato_(sh, headers, rowIndex, "KO: fuori orario");
+    return;
+  }
+
+  // controllo conflitti (ANCORA senza creare evento)
+  const cal = CalendarApp.getCalendarById(CONFIG.CALENDAR_ID);
+  const events = cal.getEvents(inizio, fine);
+  if (events.length > 0) {
+    MailApp.sendEmail(email, "Prenotazione mezzo: non disponibile",
+      "In quell'intervallo il mezzo risulta già prenotato. Scegli altri orari e reinvia la richiesta.");
+    setStato_(sh, headers, rowIndex, "KO: conflitto");
+    return;
+  }
+
+  // crea ID + Token e metti IN ATTESA
+  const idPren = "MZ-" + Utilities.formatDate(new Date(), CONFIG.TIMEZONE, "yyyyMMdd-HHmmss");
+  const token = randToken_();
+
+  setCell_(sh, headers, rowIndex, COLS.ID, idPren);
+  setCell_(sh, headers, rowIndex, COLS.TOKEN, token);
+  setCell_(sh, headers, rowIndex, COLS.STATO, "IN ATTESA");
+
+  // mail operatore con link approva/rifiuta (web app)
+  const approveUrl = `${CONFIG.WEBAPP_URL}?action=approve&token=${encodeURIComponent(token)}`;
+  const rejectUrl  = `${CONFIG.WEBAPP_URL}?action=reject&token=${encodeURIComponent(token)}`;
+
+  const bodyOp = [
+    "Nuova richiesta prenotazione (IN ATTESA).",
+    "",
+    `ID: ${idPren}`,
+    `Utente: ${email}`,
+    `Da: ${fmt_(inizio)}`,
+    `A: ${fmt_(fine)}`,
+    `Destinazione: ${destinazione || ""}`,
+    `Motivazione: ${motivazione || ""}`,
+    `Telefono: ${telefono || ""}`,
+    `Note: ${note || ""}`,
+    "",
+    `APPROVA: ${approveUrl}`,
+    `RIFIUTA: ${rejectUrl}`
+  ].join("\n");
+
+  // invia a tutti gli operatori
+  CONFIG.OPERATORE_EMAILS.forEach(op => {
+    MailApp.sendEmail(op, "APPROVAZIONE prenotazione mezzo", bodyOp);
+  });
+
+  // mail utente: "in attesa"
+  MailApp.sendEmail(email, "Prenotazione mezzo: in attesa di approvazione",
+    `La tua richiesta è stata registrata ed è in attesa di approvazione.\n\nID: ${idPren}\nDa: ${fmt_(inizio)}\nA: ${fmt_(fine)}`);
+}
+
+/************ helper write cell ************/
+function setCell_(sh, headers, rowIndex, colName, value) {
+  let col = headers.indexOf(colName) + 1;
+  if (col <= 0) {
+    col = sh.getLastColumn() + 1;
+    sh.getRange(1, col).setValue(colName);
+    headers.push(colName);
+  }
+  sh.getRange(rowIndex, col).setValue(value);
+}
+
+function setStato_(sh, headers, rowIndex, stato) {
+  setCell_(sh, headers, rowIndex, COLS.STATO, stato);
+}
+
+/************ 2) Web App endpoint: Approva / Rifiuta ************/
+function doGet(e) {
+  const action = (e.parameter.action || "").toLowerCase();
+  const token = e.parameter.token || "";
+
+  if (!token || (action !== "approve" && action !== "reject")) {
+    return HtmlService.createHtmlOutput("Richiesta non valida.");
+  }
+
+  const who = Session.getActiveUser().getEmail(); // email di chi clicca (in dominio)
+  if (!isOperatore_(who)) {
+    return HtmlService.createHtmlOutput("Non autorizzato.");
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(SHEET_PRENOTAZIONI);
+  const headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+
+  const tokenCol = headers.indexOf(COLS.TOKEN) + 1;
+  if (tokenCol <= 0) return HtmlService.createHtmlOutput("Colonna Token mancante.");
+
+  const tokens = sh.getRange(2, tokenCol, sh.getLastRow() - 1, 1).getValues().flat();
+  const idx = tokens.indexOf(token);
+  if (idx < 0) return HtmlService.createHtmlOutput("Token non trovato o già gestito.");
+
+  const rowIndex = idx + 2;
+
+  // evita doppia decisione
+  const stato = getRowValue_(sh, headers, rowIndex, COLS.STATO);
+  if (String(stato).startsWith("APPROVATA") || String(stato).startsWith("RIFIUTATA")) {
+    return HtmlService.createHtmlOutput("Richiesta già gestita.");
+  }
+
+  if (action === "reject") {
+    setCell_(sh, headers, rowIndex, COLS.STATO, "RIFIUTATA");
+    setCell_(sh, headers, rowIndex, COLS.DEC_BY, who);
+    setCell_(sh, headers, rowIndex, COLS.DEC_AT, new Date());
+
+    const email = getRowValue_(sh, headers, rowIndex, "Indirizzo email");
+    const idPren = getRowValue_(sh, headers, rowIndex, COLS.ID);
+    if (email) MailApp.sendEmail(email, "Prenotazione mezzo: rifiutata", `La richiesta ${idPren} è stata rifiutata.`);
+    return HtmlService.createHtmlOutput("Rifiutata. Puoi chiudere questa pagina.");
+  }
+
+  // action === approve: crea evento e aggiorna
+  const email = getRowValue_(sh, headers, rowIndex, "Indirizzo email");
+  const idPren = getRowValue_(sh, headers, rowIndex, COLS.ID);
+
+  const inizio = new Date(getRowValue_(sh, headers, rowIndex, "Data/ora inizio"));
+  const fine = new Date(getRowValue_(sh, headers, rowIndex, "Data/ora fine"));
+  const motivazione = getRowValue_(sh, headers, rowIndex, "Motivazione");
+  const destinazione = getRowValue_(sh, headers, rowIndex, "Destinazione") || getRowValue_(sh, headers, rowIndex, "Destinazione / itinerario");
+  const telefono = getRowValue_(sh, headers, rowIndex, "Telefono");
+  const note = getRowValue_(sh, headers, rowIndex, "Note");
+
+  // ricontrollo conflitti in fase approvazione (nel frattempo potrebbe essere cambiato)
+  const cal = CalendarApp.getCalendarById(CONFIG.CALENDAR_ID);
+  if (cal.getEvents(inizio, fine).length > 0) {
+    setCell_(sh, headers, rowIndex, COLS.STATO, "KO: conflitto in approvazione");
+    return HtmlService.createHtmlOutput("Conflitto rilevato in approvazione: non ho creato l'evento.");
+  }
+
+  const titolo = `Mezzo - ${email || "prenotazione"} (${idPren})`;
+  const descr = [
+    `ID: ${idPren}`,
+    `Utente: ${email || ""}`,
+    `Telefono: ${telefono || ""}`,
+    `Destinazione: ${destinazione || ""}`,
+    `Motivazione: ${motivazione || ""}`,
+    `Note: ${note || ""}`
+  ].join("\n");
+
+  const ev = cal.createEvent(titolo, inizio, fine, { description: descr });
+
+  setCell_(sh, headers, rowIndex, COLS.EVENTID, ev.getId());
+  setCell_(sh, headers, rowIndex, COLS.STATO, "APPROVATA");
+  setCell_(sh, headers, rowIndex, COLS.DEC_BY, who);
+  setCell_(sh, headers, rowIndex, COLS.DEC_AT, new Date());
+
+  if (email) {
+    MailApp.sendEmail(email, "Prenotazione mezzo: approvata",
+      `La tua richiesta ${idPren} è stata approvata.\n\nDa: ${fmt_(inizio)}\nA: ${fmt_(fine)}\n\nBuon lavoro.`);
+  }
+
+  return HtmlService.createHtmlOutput("Approvata e evento creato. Puoi chiudere questa pagina.");
+}
+
+function getRowValue_(sh, headers, rowIndex, colName) {
+  const col = headers.indexOf(colName) + 1;
+  if (col <= 0) return "";
+  return sh.getRange(rowIndex, col).getValue();
+}
+```
+
+**Cose devi essere adattato:**
+
+* `SHEET_PRENOTAZIONI` (nome TAB)
+* i nomi delle colonne che leggo: `"Data/ora inizio"`, `"Data/ora fine"`, `"Motivazione"`, `"Destinazione..."`, ecc. Devono combaciare con la riga 1 del tuo sheet.
+* `CONFIG.CALENDAR_ID`
+* lista `OPERATORE_EMAILS`
+
+---
+
+# 4) Trigger giusto
+Nel progetto Apps Script (del foglio):
+* Trigger (orologio) → **Aggiungi trigger**
+  * Funzione: `onPrenotazioneSubmit`
+  * Origine evento: **Dal foglio di lavoro**
+  * Tipo evento: **All’invio del modulo**
+
+*(Per la riconsegna puoi tenere l’altro trigger separato, con filtro sul nome foglio come già fatto.)*
+
+---
+
+# 5) Pubblica la Web App (per i link Approva/Rifiuta)
+Apps Script → **Distribuisci → Nuova distribuzione**
+* Tipo: **App web**
+* **Esegui come:** *te* (proprietario)
+* **Chi ha accesso:** *Utenti del dominio unifi.it* (o “solo me” non va bene perché l’operatore deve cliccare)
+* Distribuisci → Copia l’URL della Web App
+
+Poi incolli l’URL in:
+
+* `CONFIG.WEBAPP_URL = "..."`
+
+---
+
+# 6) Limitare “a pochi” chi può prenotare
+* Metti il link al Form (o alla pagina con i pulsanti) su un **Google Site** visibile solo al gruppo `mezzo-prenotazioni@unifi.it`.
+* Il Form: **limita a unifi.it** e **raccogli email**.
+
+---
+
+## Nota importante (per evitare “approvazioni da chiunque”)
+
+Il controllo vero è questa riga nel `doGet()`:
+
+```js
+if (!isOperatore_(who)) return HtmlService.createHtmlOutput("Non autorizzato.");
+```
+
+Quindi anche se qualcuno inoltra il link, **solo gli operatori in whitelist** possono approvare.
+
+---
+
+
+
+
+
+
+
+
+
+
+
 
